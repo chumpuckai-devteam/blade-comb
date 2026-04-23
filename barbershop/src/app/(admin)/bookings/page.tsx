@@ -227,8 +227,8 @@ function EventChip({
 }) {
   return (
     <div
-      className={`h-full overflow-hidden rounded-lg border-l-[3px] px-2 ${compact ? "py-0.5" : "py-1.5"}`}
-      style={{ backgroundColor: `${event.barberColor}22`, borderLeftColor: event.barberColor }}
+      className={`h-full overflow-hidden rounded-lg px-2 ${compact ? "py-0.5" : "py-1.5"}`}
+      style={{ backgroundColor: event.barberColor }}
     >
       {compact ? (
         <p className="truncate text-xs font-medium text-white">
@@ -237,7 +237,7 @@ function EventChip({
       ) : (
         <>
           <p className="truncate text-xs font-semibold text-white">{event.customerName}</p>
-          <p className="truncate text-[0.68rem] text-white/70">
+          <p className="truncate text-[0.68rem] text-white/80">
             {event.serviceName ?? "No service"} &middot; {fmt12Short(event.start)}–{fmt12Short(event.end)}
           </p>
         </>
@@ -925,6 +925,7 @@ export default async function BookingsPage({
             <NewAppointmentDialog
               barbers={barberOptions.map((b) => ({ id: b.id, displayName: b.displayName }))}
               customers={customerOptions}
+              services={serviceOptions}
               defaultBarberId={selectedBarberId || undefined}
               defaultDate={defaultAppointmentDate}
               defaultTime={defaultAppointmentTime}
