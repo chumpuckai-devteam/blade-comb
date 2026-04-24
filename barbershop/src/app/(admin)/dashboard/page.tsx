@@ -1,6 +1,7 @@
 import { endOfDay, endOfWeek, format, startOfDay, subDays } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { and, count, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentAppUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
@@ -244,9 +245,11 @@ export default async function DashboardPage() {
         <CardContent>
           <div className="space-y-2">
             {walkInPerDay.map((day, index) => (
-              <div
+              <Link
                 key={day.dateKey}
-                className="flex items-center justify-between rounded-xl border border-border/50 px-4 py-2.5"
+                href={`/bookings?view=day&date=${day.dateKey}`}
+                aria-label={`View bookings for ${format(day.date, "EEEE, MMMM d")}`}
+                className="flex items-center justify-between rounded-xl border border-border/50 px-4 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/5"
               >
                 <div className="flex items-baseline gap-2">
                   <span className="text-sm font-medium text-foreground">
@@ -264,7 +267,7 @@ export default async function DashboardPage() {
                 <span className="text-lg font-semibold tabular-nums text-foreground">
                   {day.slots}
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
           <p className="mt-3 text-xs leading-5 text-muted-foreground">{walkInNote}</p>
