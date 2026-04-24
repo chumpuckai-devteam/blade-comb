@@ -17,7 +17,7 @@ import {
   subMonths,
 } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import {
   CalendarDays,
   ChevronLeft,
@@ -38,6 +38,10 @@ import { Button } from "@/components/ui/button";
 import { getCurrentAppUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { appointments, barbers, customers, services, shops } from "@/lib/db/schema";
+import {
+  calculateWalkInCapacityPerDay,
+  parseWalkInCapacityConfig,
+} from "@/lib/walk-in-capacity";
 import { deleteAppointmentAction, updateAppointmentAction } from "./actions";
 import { NewAppointmentDialog } from "./new-appointment-dialog";
 
@@ -233,6 +237,27 @@ function formatCurrency(cents: number) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Walk-in capacity badge                                             */
+/* ------------------------------------------------------------------ */
+
+function WalkInBadge({ slots }: { slots: number | undefined }) {
+  if (slots === undefined) return null;
+  const isFull = slots === 0;
+  return (
+    <span
+      title={isFull ? "No walk-in slots left" : `${slots} walk-in slots available`}
+      className={`inline-flex items-center rounded-full px-1.5 py-px text-[0.6rem] font-medium leading-none ${
+        isFull
+          ? "bg-[#fce8e6] text-[#c5221f]"
+          : "bg-[#e6f4ea] text-[#137333]"
+      }`}
+    >
+      {isFull ? "Full" : `${slots} walk-in${slots === 1 ? "" : "s"}`}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Event pill (shared)                                                */
 /* ------------------------------------------------------------------ */
 
@@ -272,10 +297,12 @@ function TimeGrid({
   days,
   events,
   hrefForEvent,
+  walkInSlotsByDate,
 }: {
   days: Date[];
   events: CalendarEvent[];
   hrefForEvent: (id: string) => string;
+  walkInSlotsByDate: Map<string, number>;
 }) {
   const hours = Array.from(
     { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
@@ -301,22 +328,28 @@ function TimeGrid({
         }}
       >
         <div />
-        {days.map((day) => (
-          <div key={format(day, "yyyy-MM-dd")} className="px-1 py-2 text-center">
-            <p className="text-xs font-medium uppercase text-[#70757a]">{format(day, "EEE")}</p>
-            <div className="mt-1 flex justify-center">
-              <span
-                className={`flex size-10 items-center justify-center rounded-full text-lg font-medium ${
-                  isToday(day)
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#3c4043]"
-                }`}
-              >
-                {format(day, "d")}
-              </span>
+        {days.map((day) => {
+          const dayKey = format(day, "yyyy-MM-dd");
+          return (
+            <div key={dayKey} className="px-1 py-2 text-center">
+              <p className="text-xs font-medium uppercase text-[#70757a]">{format(day, "EEE")}</p>
+              <div className="mt-1 flex justify-center">
+                <span
+                  className={`flex size-10 items-center justify-center rounded-full text-lg font-medium ${
+                    isToday(day)
+                      ? "bg-[#1a73e8] text-white"
+                      : "text-[#3c4043]"
+                  }`}
+                >
+                  {format(day, "d")}
+                </span>
+              </div>
+              <div className="mt-1 flex justify-center">
+                <WalkInBadge slots={walkInSlotsByDate.get(dayKey)} />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Scrollable time body */}
@@ -408,12 +441,14 @@ function MonthGrid({
   events,
   hrefForEvent,
   hrefForDay,
+  walkInSlotsByDate,
 }: {
   days: Date[];
   anchorDate: Date;
   events: CalendarEvent[];
   hrefForEvent: (id: string) => string;
   hrefForDay: (day: Date) => string;
+  walkInSlotsByDate: Map<string, number>;
 }) {
   const map = new Map<string, CalendarEvent[]>();
   for (const d of days) map.set(format(d, "yyyy-MM-dd"), []);
@@ -440,19 +475,26 @@ function MonthGrid({
       {/* Day cells */}
       <div className="grid grid-cols-7">
         {days.map((day) => {
-          const dayEvents = map.get(format(day, "yyyy-MM-dd")) ?? [];
+          const dayKey = format(day, "yyyy-MM-dd");
+          const dayEvents = map.get(dayKey) ?? [];
           const visible = dayEvents.slice(0, 3);
           const more = dayEvents.length - visible.length;
           const inMonth = isSameMonth(day, anchorDate);
           const dayHref = hrefForDay(day);
+          const walkInSlots = inMonth ? walkInSlotsByDate.get(dayKey) : undefined;
 
           return (
             <div
-              key={format(day, "yyyy-MM-dd")}
+              key={dayKey}
               className="min-h-[120px] border-b border-r last:border-r-0"
               style={{ borderColor: "#dadce0", backgroundColor: inMonth ? "#fff" : "#f8f9fa" }}
             >
-              <div className="flex justify-center py-1.5">
+              <div
+                className={`flex items-center gap-1 px-1.5 py-1.5 ${
+                  walkInSlots !== undefined ? "justify-between" : "justify-center"
+                }`}
+              >
+                {walkInSlots !== undefined && <WalkInBadge slots={walkInSlots} />}
                 <Link
                   href={dayHref}
                   aria-label={`View ${format(day, "EEEE, MMMM d")}`}
@@ -791,11 +833,12 @@ export default async function BookingsPage({
   if (!appUser) return null;
 
   const [shop] = await db
-    .select({ timezone: shops.timezone })
+    .select({ timezone: shops.timezone, settings: shops.settings })
     .from(shops)
     .where(eq(shops.id, appUser.shopId))
     .limit(1);
   const timezone = shop?.timezone ?? "America/Chicago";
+  const walkInCapacityConfig = parseWalkInCapacityConfig(shop?.settings);
 
   const view: CalendarView =
     params.view === "day" || params.view === "month" ? params.view : "week";
@@ -804,7 +847,14 @@ export default async function BookingsPage({
   /* --- data queries --- */
 
   const barberOptions = await db
-    .select({ id: barbers.id, userId: barbers.userId, displayName: barbers.displayName, color: barbers.color })
+    .select({
+      id: barbers.id,
+      userId: barbers.userId,
+      displayName: barbers.displayName,
+      color: barbers.color,
+      isActive: barbers.isActive,
+      acceptsWalkIns: barbers.acceptsWalkIns,
+    })
     .from(barbers)
     .where(and(eq(barbers.shopId, appUser.shopId), isNull(barbers.deletedAt)))
     .orderBy(asc(barbers.displayOrder), asc(barbers.displayName));
@@ -901,6 +951,42 @@ export default async function BookingsPage({
     start: startOfWeek(startOfMonth(anchorDate), { weekStartsOn: WEEK_STARTS_ON }),
     end: endOfWeek(endOfMonth(anchorDate), { weekStartsOn: WEEK_STARTS_ON }),
   });
+
+  /* --- walk-in capacity per visible day --- */
+  const walkInBarberIds = barberOptions
+    .filter((b) => b.isActive && b.acceptsWalkIns)
+    .map((b) => b.id);
+  const visibleDayCount =
+    view === "month" ? monthDays.length : view === "week" ? weekDays.length : 1;
+  const walkInSlotsByDate = new Map<string, number>();
+  if (walkInBarberIds.length > 0) {
+    const walkInAppointments = await db
+      .select({
+        barberId: appointments.barberId,
+        scheduledStart: appointments.scheduledStart,
+        scheduledEnd: appointments.scheduledEnd,
+      })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.shopId, appUser.shopId),
+          isNull(appointments.deletedAt),
+          inArray(appointments.barberId, walkInBarberIds),
+          gte(appointments.scheduledStart, calendarStart),
+          lte(appointments.scheduledStart, calendarEnd),
+          inArray(appointments.status, ["scheduled", "confirmed", "in_progress"]),
+        ),
+      );
+    const perDay = calculateWalkInCapacityPerDay({
+      timezone,
+      walkInBarberIds,
+      appointmentWindows: walkInAppointments,
+      config: walkInCapacityConfig,
+      startDate: calendarStart,
+      lookaheadDays: visibleDayCount,
+    });
+    for (const entry of perDay) walkInSlotsByDate.set(entry.dateKey, entry.slots);
+  }
 
   const dateStr = format(anchorDate, "yyyy-MM-dd");
   const returnToHref = buildHref({ ...baseNav, date: dateStr });
@@ -1022,11 +1108,22 @@ export default async function BookingsPage({
               events={events}
               hrefForEvent={hrefForEvent}
               hrefForDay={hrefForDay}
+              walkInSlotsByDate={walkInSlotsByDate}
             />
           ) : view === "day" ? (
-            <TimeGrid days={[anchorDate]} events={events.filter((e) => isSameDay(e.start, anchorDate))} hrefForEvent={hrefForEvent} />
+            <TimeGrid
+              days={[anchorDate]}
+              events={events.filter((e) => isSameDay(e.start, anchorDate))}
+              hrefForEvent={hrefForEvent}
+              walkInSlotsByDate={walkInSlotsByDate}
+            />
           ) : (
-            <TimeGrid days={weekDays} events={events} hrefForEvent={hrefForEvent} />
+            <TimeGrid
+              days={weekDays}
+              events={events}
+              hrefForEvent={hrefForEvent}
+              walkInSlotsByDate={walkInSlotsByDate}
+            />
           )}
         </main>
       </div>

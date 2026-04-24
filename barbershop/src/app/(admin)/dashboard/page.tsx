@@ -158,8 +158,8 @@ export default async function DashboardPage() {
   const walkInNote =
     walkInBarberIds.length > 0
       ? walkInCapacityConfig.hasConfiguredHours
-        ? `Uses configured barber availability, current bookings, and ${walkInCapacityConfig.slotMinutes}-minute walk-in slots.`
-        : `Uses shop hours ${DEFAULT_SHOP_OPEN_TIME}–${DEFAULT_SHOP_CLOSE_TIME}, current bookings, and ${walkInCapacityConfig.slotMinutes}-minute walk-in slots.`
+        ? `Today reflects remaining hours from now until close. Future days use full configured availability. Based on ${walkInCapacityConfig.slotMinutes}-minute walk-in slots minus current bookings.`
+        : `Today reflects remaining hours from now until close. Future days use shop hours ${DEFAULT_SHOP_OPEN_TIME}–${DEFAULT_SHOP_CLOSE_TIME}. Based on ${walkInCapacityConfig.slotMinutes}-minute walk-in slots minus current bookings.`
       : "No active barbers are currently marked as accepting walk-ins.";
 
   const displayName = appUser.fullName ?? authUser.email ?? "there";

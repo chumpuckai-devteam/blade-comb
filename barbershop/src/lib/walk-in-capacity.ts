@@ -137,7 +137,10 @@ export function calculateWalkInCapacityFromAvailability({
   startDate?: Date;
   lookaheadDays?: number;
 }) {
-  const zonedStart = startOfDay(toZonedTime(startDate, timezone));
+  const zonedNow = toZonedTime(startDate, timezone);
+  const zonedStart = startOfDay(zonedNow);
+  const todayKey = formatDateKey(zonedNow);
+  const nowMinutes = zonedNow.getHours() * 60 + zonedNow.getMinutes();
   const bookedIntervals = new Map<string, Array<[number, number]>>();
 
   for (const appointment of appointmentWindows) {
@@ -192,8 +195,11 @@ export function calculateWalkInCapacityFromAvailability({
       let barberMinutes = 0;
 
       for (const range of schedule) {
-        const startMinutes = timeToMinutes(range.start);
-        const endMinutes = timeToMinutes(range.end);
+        const rangeStart = timeToMinutes(range.start);
+        const rangeEnd = timeToMinutes(range.end);
+        const startMinutes =
+          dateKey === todayKey ? Math.max(rangeStart, nowMinutes) : rangeStart;
+        const endMinutes = rangeEnd;
 
         if (endMinutes <= startMinutes) {
           continue;
@@ -324,6 +330,7 @@ export function calculateWalkInCapacityPerDay({
   config,
   startDate = new Date(),
   lookaheadDays = DEFAULT_WALK_IN_LOOKAHEAD_DAYS,
+  now = new Date(),
 }: {
   timezone: string;
   walkInBarberIds: string[];
@@ -331,8 +338,12 @@ export function calculateWalkInCapacityPerDay({
   config: WalkInCapacityConfig;
   startDate?: Date;
   lookaheadDays?: number;
+  now?: Date;
 }): Array<{ date: Date; dateKey: string; slots: number }> {
   const zonedStart = startOfDay(toZonedTime(startDate, timezone));
+  const zonedNow = toZonedTime(now, timezone);
+  const todayKey = formatDateKey(zonedNow);
+  const nowMinutes = zonedNow.getHours() * 60 + zonedNow.getMinutes();
   const bookedIntervals = new Map<string, Array<[number, number]>>();
 
   for (const appointment of appointmentWindows) {
@@ -363,6 +374,11 @@ export function calculateWalkInCapacityPerDay({
     const dateKey = formatDateKey(zonedDay);
     let daySlots = 0;
 
+    if (dateKey < todayKey) {
+      results.push({ date: zonedDay, dateKey, slots: 0 });
+      continue;
+    }
+
     if (!config.closedDates.has(dateKey)) {
       for (const barberId of walkInBarberIds) {
         if (config.barberUnavailableDates[barberId]?.has(dateKey)) continue;
@@ -378,8 +394,11 @@ export function calculateWalkInCapacityPerDay({
         let barberMinutes = 0;
 
         for (const range of schedule) {
-          const startMinutes = timeToMinutes(range.start);
-          const endMinutes = timeToMinutes(range.end);
+          const rangeStart = timeToMinutes(range.start);
+          const rangeEnd = timeToMinutes(range.end);
+          const startMinutes =
+            dateKey === todayKey ? Math.max(rangeStart, nowMinutes) : rangeStart;
+          const endMinutes = rangeEnd;
           if (endMinutes <= startMinutes) continue;
 
           barberMinutes += subtractBookedMinutes({
