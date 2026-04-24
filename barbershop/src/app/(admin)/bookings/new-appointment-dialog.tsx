@@ -449,6 +449,8 @@ export function NewAppointmentDialog({
                   type="time"
                   className="mt-1 h-9 w-full rounded-md border bg-white px-2.5 text-sm text-[#3c4043] outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]"
                   style={{ borderColor: "#dadce0" }}
+                  min="10:00"
+                  max="19:00"
                   value={appointmentTime}
                   onChange={(e) => setAppointmentTime(e.target.value)}
                 />

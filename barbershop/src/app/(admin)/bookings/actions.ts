@@ -1,6 +1,7 @@
 "use server";
 
 import { addMinutes } from "date-fns";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -12,7 +13,12 @@ import {
   barbers,
   customers,
   services,
+  shops,
 } from "@/lib/db/schema";
+import {
+  DEFAULT_SHOP_CLOSE_TIME,
+  DEFAULT_SHOP_OPEN_TIME,
+} from "@/lib/walk-in-capacity";
 
 const DEFAULT_APPOINTMENT_DURATION_MINUTES = 45;
 
@@ -39,6 +45,11 @@ const appointmentEditorSchema = z.object({
 type ParseAppointmentOptions = {
   requireService?: boolean;
 };
+
+function timeToMinutes(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
 
 async function syncCustomerAppointmentStats(customerId: string, shopId: string) {
   const customerAppointments = await db
@@ -127,7 +138,7 @@ async function parseAppointmentPayload(
     throw new Error("Service is required.");
   }
 
-  const [customer, barber, service] = await Promise.all([
+  const [customer, barber, service, shop] = await Promise.all([
     db
       .select({
         id: customers.id,
@@ -171,6 +182,13 @@ async function parseAppointmentPayload(
           )
           .limit(1)
       : Promise.resolve([]),
+    db
+      .select({
+        timezone: shops.timezone,
+      })
+      .from(shops)
+      .where(eq(shops.id, appUser.shopId))
+      .limit(1),
   ]);
 
   if (!customer[0]) {
@@ -185,7 +203,11 @@ async function parseAppointmentPayload(
     throw new Error("Selected service was not found.");
   }
 
-  const scheduledStart = new Date(`${appointmentDate}T${appointmentTime}:00`);
+  const timezone = shop[0]?.timezone ?? "America/Chicago";
+  const scheduledStart = fromZonedTime(
+    `${appointmentDate}T${appointmentTime}:00`,
+    timezone,
+  );
 
   if (Number.isNaN(scheduledStart.valueOf())) {
     throw new Error("Appointment date or time is invalid.");
@@ -195,6 +217,24 @@ async function parseAppointmentPayload(
     scheduledStart,
     service[0]?.durationMinutes ?? DEFAULT_APPOINTMENT_DURATION_MINUTES,
   );
+  const zonedStart = toZonedTime(scheduledStart, timezone);
+  const zonedEnd = toZonedTime(scheduledEnd, timezone);
+  const startMinutes = zonedStart.getHours() * 60 + zonedStart.getMinutes();
+  const endMinutes = zonedEnd.getHours() * 60 + zonedEnd.getMinutes();
+  const openMinutes = timeToMinutes(DEFAULT_SHOP_OPEN_TIME);
+  const closeMinutes = timeToMinutes(DEFAULT_SHOP_CLOSE_TIME);
+
+  if (
+    zonedStart.getFullYear() !== zonedEnd.getFullYear() ||
+    zonedStart.getMonth() !== zonedEnd.getMonth() ||
+    zonedStart.getDate() !== zonedEnd.getDate() ||
+    startMinutes < openMinutes ||
+    endMinutes > closeMinutes
+  ) {
+    throw new Error(
+      `Appointments must stay within shop hours: ${DEFAULT_SHOP_OPEN_TIME} to ${DEFAULT_SHOP_CLOSE_TIME}.`,
+    );
+  }
 
   return {
     appUser,

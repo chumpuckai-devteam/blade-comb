@@ -16,6 +16,7 @@ import {
   startOfWeek,
   subMonths,
 } from "date-fns";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
 import {
   CalendarDays,
@@ -36,7 +37,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { getCurrentAppUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
-import { appointments, barbers, customers, services } from "@/lib/db/schema";
+import { appointments, barbers, customers, services, shops } from "@/lib/db/schema";
 import { deleteAppointmentAction, updateAppointmentAction } from "./actions";
 import { NewAppointmentDialog } from "./new-appointment-dialog";
 
@@ -160,16 +161,26 @@ function hourLabel(hour: number) {
   );
 }
 
-function startOfViewRange(view: CalendarView, d: Date) {
-  if (view === "day") return startOfDay(d);
-  if (view === "week") return startOfWeek(d, { weekStartsOn: WEEK_STARTS_ON });
-  return startOfWeek(startOfMonth(d), { weekStartsOn: WEEK_STARTS_ON });
+function startOfViewRange(view: CalendarView, d: Date, timezone: string) {
+  const localStart =
+    view === "day"
+      ? startOfDay(d)
+      : view === "week"
+        ? startOfWeek(d, { weekStartsOn: WEEK_STARTS_ON })
+        : startOfWeek(startOfMonth(d), { weekStartsOn: WEEK_STARTS_ON });
+
+  return fromZonedTime(localStart, timezone);
 }
 
-function endOfViewRange(view: CalendarView, d: Date) {
-  if (view === "day") return endOfDay(d);
-  if (view === "week") return endOfWeek(d, { weekStartsOn: WEEK_STARTS_ON });
-  return endOfWeek(endOfMonth(d), { weekStartsOn: WEEK_STARTS_ON });
+function endOfViewRange(view: CalendarView, d: Date, timezone: string) {
+  const localEnd =
+    view === "day"
+      ? endOfDay(d)
+      : view === "week"
+        ? endOfWeek(d, { weekStartsOn: WEEK_STARTS_ON })
+        : endOfWeek(endOfMonth(d), { weekStartsOn: WEEK_STARTS_ON });
+
+  return fromZonedTime(localEnd, timezone);
 }
 
 function shiftDate(view: CalendarView, d: Date, dir: -1 | 1) {
@@ -190,12 +201,19 @@ function rangeLabel(view: CalendarView, d: Date) {
   return format(d, "MMMM yyyy");
 }
 
-function toEvents(rows: BookingRow[], colorMap: Map<string, string>): CalendarEvent[] {
+function toEvents(
+  rows: BookingRow[],
+  colorMap: Map<string, string>,
+  timezone: string,
+): CalendarEvent[] {
   return rows
     .filter((r): r is BookingRow & { scheduledStart: Date } => Boolean(r.scheduledStart))
     .map((r) => {
-      const start = new Date(r.scheduledStart);
-      const end = r.scheduledEnd ? new Date(r.scheduledEnd) : addMinutes(start, 45);
+      const start = toZonedTime(r.scheduledStart, timezone);
+      const end = toZonedTime(
+        r.scheduledEnd ?? addMinutes(r.scheduledStart, 45),
+        timezone,
+      );
       return {
         ...r,
         start,
@@ -764,6 +782,13 @@ export default async function BookingsPage({
   if (!authUser) redirect("/login");
   if (!appUser) return null;
 
+  const [shop] = await db
+    .select({ timezone: shops.timezone })
+    .from(shops)
+    .where(eq(shops.id, appUser.shopId))
+    .limit(1);
+  const timezone = shop?.timezone ?? "America/Chicago";
+
   const view: CalendarView =
     params.view === "day" || params.view === "month" ? params.view : "week";
   const anchorDate = safeAnchorDate(params.date);
@@ -795,8 +820,8 @@ export default async function BookingsPage({
       : undefined;
   const selectedBarberId = params.barberId ?? assignedBarberId ?? "";
 
-  const calendarStart = startOfViewRange(view, anchorDate);
-  const calendarEnd = endOfViewRange(view, anchorDate);
+  const calendarStart = startOfViewRange(view, anchorDate, timezone);
+  const calendarEnd = endOfViewRange(view, anchorDate, timezone);
 
   const conditions = [
     eq(appointments.shopId, appUser.shopId),
@@ -840,7 +865,7 @@ export default async function BookingsPage({
     ...b,
     color: colorMap.get(b.id) ?? b.color ?? BARBER_PALETTE[0],
   }));
-  const events = toEvents(rows, colorMap);
+  const events = toEvents(rows, colorMap, timezone);
 
   const barberCounts = new Map<string, number>();
   const statusCounts = new Map<string, number>();
@@ -877,7 +902,7 @@ export default async function BookingsPage({
     : null;
 
   const defaultAppointmentDate = dateStr;
-  const defaultAppointmentTime = view === "day" ? "09:00" : "10:00";
+  const defaultAppointmentTime = "10:00";
 
   /* --- view toggle button data --- */
   const viewButtons: { id: CalendarView; icon: React.ReactNode; label: string }[] = [
@@ -1089,7 +1114,7 @@ export default async function BookingsPage({
                     </label>
                     <label className="block space-y-1">
                       <span className="text-xs text-[#5f6368]">Time</span>
-                      <input className="h-9 w-full rounded-md border bg-white px-2.5 text-sm text-[#3c4043] outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]" style={{ borderColor: "#dadce0" }} defaultValue={format(selectedAppointment.start, "HH:mm")} name="appointmentTime" type="time" />
+                      <input className="h-9 w-full rounded-md border bg-white px-2.5 text-sm text-[#3c4043] outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]" style={{ borderColor: "#dadce0" }} defaultValue={format(selectedAppointment.start, "HH:mm")} min="10:00" max="19:00" name="appointmentTime" type="time" />
                     </label>
                   </div>
 
