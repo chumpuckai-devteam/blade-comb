@@ -1133,10 +1133,11 @@ export default async function BookingsPage({
 
       {/* ── Appointment detail modal ── */}
       {selectedAppointment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40">
+          <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+          <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 sm:max-h-[calc(100dvh-2rem)]">
             {/* Header */}
-            <div className="flex items-start justify-between border-b px-5 py-4" style={{ borderColor: "#dadce0" }}>
+            <div className="flex shrink-0 items-start justify-between border-b bg-white px-5 py-4" style={{ borderColor: "#dadce0" }}>
               <div className="min-w-0 pr-4">
                 <div className="flex items-center gap-2">
                   <span className="size-3 rounded-full" style={{ backgroundColor: selectedAppointment.barberColor }} />
@@ -1162,7 +1163,7 @@ export default async function BookingsPage({
             </div>
 
             {/* Detail + Edit */}
-            <div className="grid gap-0 sm:grid-cols-2">
+            <div className="grid gap-0 overflow-y-auto sm:grid-cols-2">
               {/* Info */}
               <div className="space-y-3 border-r p-5" style={{ borderColor: "#dadce0" }}>
                 <div className="flex items-start gap-2.5">
@@ -1266,6 +1267,7 @@ export default async function BookingsPage({
                 </form>
               </div>
             </div>
+          </div>
           </div>
         </div>
       )}

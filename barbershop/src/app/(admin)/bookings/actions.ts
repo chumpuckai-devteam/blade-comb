@@ -372,6 +372,88 @@ function revalidateBookingsSurfaces() {
   revalidatePath("/bookings");
   revalidatePath("/dashboard");
   revalidatePath("/customers");
+  revalidatePath("/check-in");
+}
+
+const appointmentStatusSchema = z.object({
+  appointmentId: z.uuid(),
+  status: z.enum([
+    "scheduled",
+    "confirmed",
+    "in_progress",
+    "completed",
+    "cancelled",
+    "no_show",
+  ]),
+  returnTo: z.string().optional(),
+});
+
+export async function updateAppointmentStatusAction(formData: FormData) {
+  const { authUser, appUser } = await getCurrentAppUser();
+
+  if (!authUser || !appUser) {
+    throw new Error("You must be signed in to manage appointments.");
+  }
+
+  const parsed = appointmentStatusSchema.safeParse({
+    appointmentId: formData.get("appointmentId"),
+    status: formData.get("status"),
+    returnTo: formData.get("returnTo")?.toString() || undefined,
+  });
+
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? "Invalid status update.");
+  }
+
+  const { appointmentId, status, returnTo } = parsed.data;
+
+  const [existing] = await db
+    .select({
+      id: appointments.id,
+      customerId: appointments.customerId,
+      actualStart: appointments.actualStart,
+    })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.id, appointmentId),
+        eq(appointments.shopId, appUser.shopId),
+        isNull(appointments.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Appointment not found.");
+  }
+
+  const now = new Date();
+  const updates: Partial<typeof appointments.$inferInsert> = {
+    status,
+    updatedAt: now,
+  };
+
+  if (status === "in_progress" && !existing.actualStart) {
+    updates.actualStart = now;
+  }
+  if (status === "completed") {
+    updates.actualEnd = now;
+    if (!existing.actualStart) {
+      updates.actualStart = now;
+    }
+  }
+
+  await db
+    .update(appointments)
+    .set(updates)
+    .where(eq(appointments.id, appointmentId));
+
+  await syncCustomerAppointmentStats(existing.customerId, appUser.shopId);
+  revalidateBookingsSurfaces();
+
+  if (returnTo) {
+    redirect(returnTo);
+  }
 }
 
 export async function createAppointmentAction(formData: FormData) {

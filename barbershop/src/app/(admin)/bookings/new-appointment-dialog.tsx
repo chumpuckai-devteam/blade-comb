@@ -51,6 +51,10 @@ type NewAppointmentDialogProps = {
   defaultTime: string;
   defaultBarberId?: string;
   lockBarber?: boolean;
+  defaultSource?: string;
+  defaultStatus?: string;
+  triggerLabel?: string;
+  triggerClassName?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -158,6 +162,10 @@ export function NewAppointmentDialog({
   defaultTime,
   defaultBarberId,
   lockBarber = false,
+  defaultSource = "manual",
+  defaultStatus = "scheduled",
+  triggerLabel = "New appointment",
+  triggerClassName,
 }: NewAppointmentDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -166,7 +174,7 @@ export function NewAppointmentDialog({
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [selectedBarberId, setSelectedBarberId] = useState(defaultBarberId ?? "");
   const [selectedServiceId, setSelectedServiceId] = useState("");
-  const [selectedSource, setSelectedSource] = useState("manual");
+  const [selectedSource, setSelectedSource] = useState(defaultSource);
   const [appointmentDate, setAppointmentDate] = useState(defaultDate);
   const [appointmentTime, setAppointmentTime] = useState(defaultTime);
   const [notes, setNotes] = useState("");
@@ -194,7 +202,7 @@ export function NewAppointmentDialog({
     setSelectedCustomerId("");
     setSelectedBarberId(defaultBarberId ?? "");
     setSelectedServiceId("");
-    setSelectedSource("manual");
+    setSelectedSource(defaultSource);
     setAppointmentDate(defaultDate);
     setAppointmentTime(defaultTime);
     setNotes("");
@@ -298,7 +306,7 @@ export function NewAppointmentDialog({
     if (selectedServiceId) formData.set("serviceId", selectedServiceId);
     formData.set("appointmentDate", appointmentDate);
     formData.set("appointmentTime", appointmentTime);
-    formData.set("status", "scheduled");
+    formData.set("status", defaultStatus);
     formData.set("source", selectedSource);
     formData.set("notes", notes);
 
@@ -326,10 +334,13 @@ export function NewAppointmentDialog({
       <DialogTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-[#3c4043] shadow-md ring-1 ring-black/5 transition hover:shadow-lg"
+          className={
+            triggerClassName ??
+            "flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-[#3c4043] shadow-md ring-1 ring-black/5 transition hover:shadow-lg"
+          }
         >
           <Plus className="size-5 text-[#1a73e8]" />
-          New appointment
+          {triggerLabel}
         </button>
       </DialogTrigger>
 

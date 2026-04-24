@@ -9,6 +9,7 @@ import { AdminNav } from "./admin-nav";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/check-in", label: "Check-In" },
   { href: "/customers", label: "Customers" },
   { href: "/bookings", label: "Bookings" },
   { href: "/availability", label: "Availability" },
