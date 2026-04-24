@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { LogOut } from "lucide-react";
@@ -6,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getCurrentAppUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { AdminNav } from "./admin-nav";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -80,17 +80,7 @@ export default async function AdminLayout({
             </div>
           </div>
 
-          <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 xl:mt-6 xl:block xl:space-y-1 xl:overflow-visible xl:pb-0">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="shrink-0 rounded-xl border border-border/70 px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground xl:block xl:border-transparent"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <AdminNav items={navItems} />
 
           <form action={signOut} className="mt-5 xl:mt-auto xl:pt-6">
             <Button className="w-full justify-start gap-2" variant="outline" type="submit">

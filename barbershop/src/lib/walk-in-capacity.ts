@@ -1,7 +1,7 @@
 import { addDays, addMinutes, endOfDay, startOfDay } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 
-export const DEFAULT_WALK_IN_SLOT_MINUTES = 45;
+export const DEFAULT_WALK_IN_SLOT_MINUTES = 30;
 export const DEFAULT_WALK_IN_HOURS_PER_DAY = 8;
 export const DEFAULT_WALK_IN_LOOKAHEAD_DAYS = 7;
 export const DEFAULT_SHOP_OPEN_TIME = "10:00";
@@ -163,7 +163,7 @@ export function calculateWalkInCapacityFromAvailability({
     bookedIntervals.set(key, intervals);
   }
 
-  let availableMinutes = 0;
+  let totalSlots = 0;
 
   for (let index = 0; index < lookaheadDays; index += 1) {
     const zonedDay = addDays(zonedStart, index);
@@ -189,6 +189,7 @@ export function calculateWalkInCapacityFromAvailability({
       }
 
       const intervals = mergeIntervals(bookedIntervals.get(`${barberId}:${dateKey}`) ?? []);
+      let barberMinutes = 0;
 
       for (const range of schedule) {
         const startMinutes = timeToMinutes(range.start);
@@ -198,16 +199,18 @@ export function calculateWalkInCapacityFromAvailability({
           continue;
         }
 
-        availableMinutes += subtractBookedMinutes({
+        barberMinutes += subtractBookedMinutes({
           startMinutes,
           endMinutes,
           bookedIntervals: intervals,
         });
       }
+
+      totalSlots += Math.floor(barberMinutes / config.slotMinutes);
     }
   }
 
-  return Math.max(0, Math.floor(availableMinutes / config.slotMinutes));
+  return Math.max(0, totalSlots);
 }
 
 function normalizeWeeklySchedule(value: unknown): WeeklySchedule | null {
@@ -358,7 +361,7 @@ export function calculateWalkInCapacityPerDay({
     const zonedDay = addDays(zonedStart, index);
     const weekday = zonedDay.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
     const dateKey = formatDateKey(zonedDay);
-    let dayMinutes = 0;
+    let daySlots = 0;
 
     if (!config.closedDates.has(dateKey)) {
       for (const barberId of walkInBarberIds) {
@@ -372,25 +375,28 @@ export function calculateWalkInCapacityPerDay({
         if (!schedule.length) continue;
 
         const intervals = mergeIntervals(bookedIntervals.get(`${barberId}:${dateKey}`) ?? []);
+        let barberMinutes = 0;
 
         for (const range of schedule) {
           const startMinutes = timeToMinutes(range.start);
           const endMinutes = timeToMinutes(range.end);
           if (endMinutes <= startMinutes) continue;
 
-          dayMinutes += subtractBookedMinutes({
+          barberMinutes += subtractBookedMinutes({
             startMinutes,
             endMinutes,
             bookedIntervals: intervals,
           });
         }
+
+        daySlots += Math.floor(barberMinutes / config.slotMinutes);
       }
     }
 
     results.push({
       date: zonedDay,
       dateKey,
-      slots: Math.max(0, Math.floor(dayMinutes / config.slotMinutes)),
+      slots: Math.max(0, daySlots),
     });
   }
 

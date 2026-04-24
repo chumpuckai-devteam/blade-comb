@@ -407,11 +407,13 @@ function MonthGrid({
   anchorDate,
   events,
   hrefForEvent,
+  hrefForDay,
 }: {
   days: Date[];
   anchorDate: Date;
   events: CalendarEvent[];
   hrefForEvent: (id: string) => string;
+  hrefForDay: (day: Date) => string;
 }) {
   const map = new Map<string, CalendarEvent[]>();
   for (const d of days) map.set(format(d, "yyyy-MM-dd"), []);
@@ -442,6 +444,7 @@ function MonthGrid({
           const visible = dayEvents.slice(0, 3);
           const more = dayEvents.length - visible.length;
           const inMonth = isSameMonth(day, anchorDate);
+          const dayHref = hrefForDay(day);
 
           return (
             <div
@@ -450,17 +453,19 @@ function MonthGrid({
               style={{ borderColor: "#dadce0", backgroundColor: inMonth ? "#fff" : "#f8f9fa" }}
             >
               <div className="flex justify-center py-1.5">
-                <span
-                  className={`flex size-7 items-center justify-center rounded-full text-xs font-medium ${
+                <Link
+                  href={dayHref}
+                  aria-label={`View ${format(day, "EEEE, MMMM d")}`}
+                  className={`flex size-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${
                     isToday(day)
-                      ? "bg-[#1a73e8] text-white"
+                      ? "bg-[#1a73e8] text-white hover:bg-[#1765cc]"
                       : inMonth
-                        ? "text-[#3c4043]"
-                        : "text-[#70757a]"
+                        ? "text-[#3c4043] hover:bg-[#f1f3f4]"
+                        : "text-[#70757a] hover:bg-[#f1f3f4]"
                   }`}
                 >
                   {format(day, "d")}
-                </span>
+                </Link>
               </div>
               <div className="space-y-0.5 px-1 pb-1">
                 {visible.map((ev) => (
@@ -469,9 +474,12 @@ function MonthGrid({
                   </Link>
                 ))}
                 {more > 0 && (
-                  <p className="px-1 text-xs font-medium text-[#1a73e8]">
+                  <Link
+                    href={dayHref}
+                    className="block rounded px-1 text-xs font-medium text-[#1a73e8] hover:bg-[#f1f3f4]"
+                  >
                     +{more} more
-                  </p>
+                  </Link>
                 )}
               </div>
             </div>
@@ -897,6 +905,8 @@ export default async function BookingsPage({
   const dateStr = format(anchorDate, "yyyy-MM-dd");
   const returnToHref = buildHref({ ...baseNav, date: dateStr });
   const hrefForEvent = (id: string) => buildHref({ ...baseNav, date: dateStr, appointmentId: id });
+  const hrefForDay = (day: Date) =>
+    buildHref({ ...baseNav, view: "day", date: format(day, "yyyy-MM-dd") });
   const selectedAppointment = params.appointmentId
     ? events.find((ev) => ev.id === params.appointmentId)
     : null;
@@ -1006,7 +1016,13 @@ export default async function BookingsPage({
         {/* Calendar content */}
         <main className="min-w-0 flex-1">
           {view === "month" ? (
-            <MonthGrid anchorDate={anchorDate} days={monthDays} events={events} hrefForEvent={hrefForEvent} />
+            <MonthGrid
+              anchorDate={anchorDate}
+              days={monthDays}
+              events={events}
+              hrefForEvent={hrefForEvent}
+              hrefForDay={hrefForDay}
+            />
           ) : view === "day" ? (
             <TimeGrid days={[anchorDate]} events={events.filter((e) => isSameDay(e.start, anchorDate))} hrefForEvent={hrefForEvent} />
           ) : (
