@@ -22,6 +22,14 @@ export default async function AdminLayout({
 }) {
   const { authUser, appUser } = await getCurrentAppUser();
 
+  async function signOut() {
+    "use server";
+
+    const supabase = await createClient();
+    await supabase.auth.signOut();
+    redirect("/login");
+  }
+
   if (!authUser) {
     redirect("/login");
   }
@@ -40,17 +48,14 @@ export default async function AdminLayout({
             Your authentication account exists, but there is no matching staff
             record in the app database yet.
           </p>
+          <form action={signOut} className="mt-6">
+            <Button variant="outline" type="submit">
+              Sign Out
+            </Button>
+          </form>
         </Card>
       </main>
     );
-  }
-
-  async function signOut() {
-    "use server";
-
-    const supabase = await createClient();
-    await supabase.auth.signOut();
-    redirect("/login");
   }
 
   const displayName = appUser.fullName ?? authUser.email ?? "Staff member";
