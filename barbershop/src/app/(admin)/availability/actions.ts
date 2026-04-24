@@ -3,12 +3,37 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentAppUser } from "@/lib/auth";
+import { normalizeTimeRange } from "@/lib/booking-availability";
 import { db } from "@/lib/db/client";
 import { shops } from "@/lib/db/schema";
+import {
+  DEFAULT_SHOP_CLOSE_TIME,
+  DEFAULT_SHOP_OPEN_TIME,
+} from "@/lib/walk-in-capacity";
 
 type WeeklyScheduleInput = Partial<
   Record<string, Array<{ start: string; end: string }>>
 >;
+
+function validateWeeklySchedule(schedule: WeeklyScheduleInput) {
+  for (const [day, ranges] of Object.entries(schedule)) {
+    if (!Array.isArray(ranges)) {
+      throw new Error(`Invalid schedule for day ${day}.`);
+    }
+
+    for (const range of ranges) {
+      if (!range?.start || !range?.end) {
+        throw new Error(`Each active day must have a start and end time.`);
+      }
+
+      if (!normalizeTimeRange(range)) {
+        throw new Error(
+          `Availability must stay within shop hours ${DEFAULT_SHOP_OPEN_TIME} to ${DEFAULT_SHOP_CLOSE_TIME}.`,
+        );
+      }
+    }
+  }
+}
 
 export async function updateBarberAvailabilityAction(formData: FormData) {
   const { authUser, appUser } = await getCurrentAppUser();
@@ -34,6 +59,8 @@ export async function updateBarberAvailabilityAction(formData: FormData) {
   } catch {
     throw new Error("Invalid schedule format.");
   }
+
+  validateWeeklySchedule(schedule);
 
   // Read current settings
   const [shop] = await db

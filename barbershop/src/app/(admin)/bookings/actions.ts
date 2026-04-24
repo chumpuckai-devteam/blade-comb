@@ -1,12 +1,16 @@
 "use server";
 
-import { addMinutes } from "date-fns";
-import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { and, eq, isNull } from "drizzle-orm";
+import { addMinutes, endOfDay, startOfDay } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
+import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getCurrentAppUser } from "@/lib/auth";
+import {
+  generateBookableStartTimes,
+  validateAppointmentTime,
+} from "@/lib/booking-availability";
 import { db } from "@/lib/db/client";
 import {
   appointments,
@@ -15,10 +19,7 @@ import {
   services,
   shops,
 } from "@/lib/db/schema";
-import {
-  DEFAULT_SHOP_CLOSE_TIME,
-  DEFAULT_SHOP_OPEN_TIME,
-} from "@/lib/walk-in-capacity";
+import { parseWalkInCapacityConfig } from "@/lib/walk-in-capacity";
 
 const DEFAULT_APPOINTMENT_DURATION_MINUTES = 45;
 
@@ -45,11 +46,6 @@ const appointmentEditorSchema = z.object({
 type ParseAppointmentOptions = {
   requireService?: boolean;
 };
-
-function timeToMinutes(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return hours * 60 + minutes;
-}
 
 async function syncCustomerAppointmentStats(customerId: string, shopId: string) {
   const customerAppointments = await db
@@ -185,6 +181,7 @@ async function parseAppointmentPayload(
     db
       .select({
         timezone: shops.timezone,
+        settings: shops.settings,
       })
       .from(shops)
       .where(eq(shops.id, appUser.shopId))
@@ -204,6 +201,7 @@ async function parseAppointmentPayload(
   }
 
   const timezone = shop[0]?.timezone ?? "America/Chicago";
+  const config = parseWalkInCapacityConfig(shop[0]?.settings);
   const scheduledStart = fromZonedTime(
     `${appointmentDate}T${appointmentTime}:00`,
     timezone,
@@ -217,23 +215,40 @@ async function parseAppointmentPayload(
     scheduledStart,
     service[0]?.durationMinutes ?? DEFAULT_APPOINTMENT_DURATION_MINUTES,
   );
-  const zonedStart = toZonedTime(scheduledStart, timezone);
-  const zonedEnd = toZonedTime(scheduledEnd, timezone);
-  const startMinutes = zonedStart.getHours() * 60 + zonedStart.getMinutes();
-  const endMinutes = zonedEnd.getHours() * 60 + zonedEnd.getMinutes();
-  const openMinutes = timeToMinutes(DEFAULT_SHOP_OPEN_TIME);
-  const closeMinutes = timeToMinutes(DEFAULT_SHOP_CLOSE_TIME);
-
-  if (
-    zonedStart.getFullYear() !== zonedEnd.getFullYear() ||
-    zonedStart.getMonth() !== zonedEnd.getMonth() ||
-    zonedStart.getDate() !== zonedEnd.getDate() ||
-    startMinutes < openMinutes ||
-    endMinutes > closeMinutes
-  ) {
-    throw new Error(
-      `Appointments must stay within shop hours: ${DEFAULT_SHOP_OPEN_TIME} to ${DEFAULT_SHOP_CLOSE_TIME}.`,
+  const localDate = new Date(`${appointmentDate}T12:00:00`);
+  const localDayStart = fromZonedTime(startOfDay(localDate), timezone);
+  const localDayEnd = fromZonedTime(endOfDay(localDate), timezone);
+  const existingAppointments = await db
+    .select({
+      id: appointments.id,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      status: appointments.status,
+    })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.shopId, appUser.shopId),
+        eq(appointments.barberId, barber[0].id),
+        isNull(appointments.deletedAt),
+        gte(appointments.scheduledStart, localDayStart),
+        lte(appointments.scheduledStart, localDayEnd),
+      ),
     );
+
+  const availabilityError = validateAppointmentTime({
+    barberId: barber[0].id,
+    config,
+    date: localDate,
+    timezone,
+    scheduledStart,
+    scheduledEnd,
+    existingAppointments,
+    excludeAppointmentId: appointmentId,
+  });
+
+  if (availabilityError) {
+    throw new Error(availabilityError);
   }
 
   return {
@@ -250,6 +265,107 @@ async function parseAppointmentPayload(
     notes,
     returnTo: returnTo ?? "/bookings",
   };
+}
+
+const getBookableTimeSlotsSchema = z.object({
+  barberId: z.uuid(),
+  appointmentDate: z.string().min(1),
+  serviceId: z.uuid().optional().nullable(),
+  appointmentId: z.uuid().optional().nullable(),
+});
+
+export async function getBookableTimeSlotsAction(input: {
+  barberId: string;
+  appointmentDate: string;
+  serviceId?: string | null;
+  appointmentId?: string | null;
+}) {
+  const { authUser, appUser } = await getCurrentAppUser();
+
+  if (!authUser || !appUser) {
+    throw new Error("You must be signed in.");
+  }
+
+  const parsed = getBookableTimeSlotsSchema.safeParse(input);
+
+  if (!parsed.success) {
+    throw new Error("Invalid booking slot request.");
+  }
+
+  const { barberId, appointmentDate, serviceId, appointmentId } = parsed.data;
+
+  const [barber, shop, service] = await Promise.all([
+    db
+      .select({ id: barbers.id })
+      .from(barbers)
+      .where(
+        and(
+          eq(barbers.id, barberId),
+          eq(barbers.shopId, appUser.shopId),
+          isNull(barbers.deletedAt),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ timezone: shops.timezone, settings: shops.settings })
+      .from(shops)
+      .where(eq(shops.id, appUser.shopId))
+      .limit(1),
+    serviceId
+      ? db
+          .select({
+            durationMinutes: services.durationMinutes,
+          })
+          .from(services)
+          .where(
+            and(
+              eq(services.id, serviceId),
+              eq(services.shopId, appUser.shopId),
+              isNull(services.deletedAt),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+  ]);
+
+  if (!barber[0]) {
+    throw new Error("Selected barber was not found.");
+  }
+
+  const timezone = shop[0]?.timezone ?? "America/Chicago";
+  const config = parseWalkInCapacityConfig(shop[0]?.settings);
+  const durationMinutes =
+    service[0]?.durationMinutes ?? DEFAULT_APPOINTMENT_DURATION_MINUTES;
+  const localDate = new Date(`${appointmentDate}T12:00:00`);
+  const localDayStart = fromZonedTime(startOfDay(localDate), timezone);
+  const localDayEnd = fromZonedTime(endOfDay(localDate), timezone);
+  const existingAppointments = await db
+    .select({
+      id: appointments.id,
+      scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
+      status: appointments.status,
+    })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.shopId, appUser.shopId),
+        eq(appointments.barberId, barberId),
+        isNull(appointments.deletedAt),
+        gte(appointments.scheduledStart, localDayStart),
+        lte(appointments.scheduledStart, localDayEnd),
+      ),
+    );
+
+  return generateBookableStartTimes({
+    barberId,
+    config,
+    date: localDate,
+    timezone,
+    durationMinutes,
+    existingAppointments,
+    excludeAppointmentId: appointmentId ?? undefined,
+  });
 }
 
 function revalidateBookingsSurfaces() {

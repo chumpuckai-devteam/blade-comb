@@ -151,6 +151,8 @@ function BarberScheduleCard({ barber }: { barber: BarberData }) {
                     <div className="flex items-center gap-1.5">
                       <Input
                         type="time"
+                        min="10:00"
+                        max="19:00"
                         value={ranges[0]?.start ?? "10:00"}
                         onChange={(e) => updateTime(day, "start", e.target.value)}
                         className="h-8 w-28 text-sm"
@@ -158,6 +160,8 @@ function BarberScheduleCard({ barber }: { barber: BarberData }) {
                       <span className="text-xs text-muted-foreground">to</span>
                       <Input
                         type="time"
+                        min="10:00"
+                        max="19:00"
                         value={ranges[0]?.end ?? "19:00"}
                         onChange={(e) => updateTime(day, "end", e.target.value)}
                         className="h-8 w-28 text-sm"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clock3, Plus, Search, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { createCustomerAction } from "../customers/actions";
-import { createAppointmentAction } from "./actions";
+import {
+  createAppointmentAction,
+  getBookableTimeSlotsAction,
+} from "./actions";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -73,6 +76,12 @@ const SOURCE_OPTIONS = [
   { value: "walk_in", label: "Walk-in" },
   { value: "online", label: "Online" },
 ] as const;
+
+const SLOT_REASON_LABELS = {
+  barber_unavailable: "This barber is marked unavailable on that date.",
+  off_day: "This barber is off on that date.",
+  shop_closed: "The shop is closed on that date.",
+} as const;
 
 /* ------------------------------------------------------------------ */
 /*  Date selects                                                       */
@@ -164,6 +173,9 @@ export function NewAppointmentDialog({
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [isAddingCustomer, startAddCustomer] = useTransition();
   const [localCustomers, setLocalCustomers] = useState<CustomerOption[]>(customers);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [slotMessage, setSlotMessage] = useState("Select a barber and date.");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -188,6 +200,9 @@ export function NewAppointmentDialog({
     setNotes("");
     setShowNewCustomer(false);
     setLocalCustomers(customers);
+    setAvailableTimes([]);
+    setIsLoadingSlots(false);
+    setSlotMessage("Select a barber and date.");
   }
 
   function handleAddCustomer(formData: FormData) {
@@ -208,6 +223,71 @@ export function NewAppointmentDialog({
     setOpen(next);
     if (!next) reset();
   }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSlots() {
+      if (!open || !selectedBarberId || !appointmentDate) {
+        setAvailableTimes([]);
+        setAppointmentTime("");
+        setSlotMessage("Select a barber and date.");
+        return;
+      }
+
+      setIsLoadingSlots(true);
+
+      try {
+        const result = await getBookableTimeSlotsAction({
+          barberId: selectedBarberId,
+          appointmentDate,
+          serviceId: selectedServiceId || null,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setAvailableTimes(result.times);
+
+        if (result.times.length > 0) {
+          setSlotMessage(
+            "Times shown are inside saved availability and exclude booked slots.",
+          );
+          setAppointmentTime((current) =>
+            current && result.times.includes(current) ? current : result.times[0],
+          );
+        } else {
+          setAppointmentTime("");
+          setSlotMessage(
+            result.reason
+              ? SLOT_REASON_LABELS[result.reason]
+              : "No bookable time slots remain for this barber on that date.",
+          );
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setAvailableTimes([]);
+        setAppointmentTime("");
+        setSlotMessage(
+          error instanceof Error ? error.message : "Could not load available times.",
+        );
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSlots(false);
+        }
+      }
+    }
+
+    void loadSlots();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentDate, open, selectedBarberId, selectedServiceId]);
 
   async function handleSubmit(formData: FormData) {
     if (!selectedCustomerId) { toast.error("Select a customer."); return; }
@@ -234,7 +314,12 @@ export function NewAppointmentDialog({
     });
   }
 
-  const canSubmit = selectedCustomerId && selectedBarberId && appointmentDate && appointmentTime;
+  const canSubmit =
+    Boolean(selectedCustomerId) &&
+    Boolean(selectedBarberId) &&
+    Boolean(appointmentDate) &&
+    Boolean(appointmentTime) &&
+    availableTimes.includes(appointmentTime);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -444,16 +529,27 @@ export function NewAppointmentDialog({
               {/* Time */}
               <div>
                 <label htmlFor="appt-time" className="text-xs font-medium text-[#5f6368]">Start time</label>
-                <input
+                <select
                   id="appt-time"
-                  type="time"
                   className="mt-1 h-9 w-full rounded-md border bg-white px-2.5 text-sm text-[#3c4043] outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]"
                   style={{ borderColor: "#dadce0" }}
-                  min="10:00"
-                  max="19:00"
                   value={appointmentTime}
                   onChange={(e) => setAppointmentTime(e.target.value)}
-                />
+                  disabled={isLoadingSlots || availableTimes.length === 0}
+                >
+                  {isLoadingSlots ? (
+                    <option value="">Loading times...</option>
+                  ) : availableTimes.length > 0 ? (
+                    availableTimes.map((time) => (
+                      <option key={time} value={time}>
+                        {time}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No available times</option>
+                  )}
+                </select>
+                <p className="mt-1 text-xs text-[#5f6368]">{slotMessage}</p>
               </div>
 
               {/* Barber */}
