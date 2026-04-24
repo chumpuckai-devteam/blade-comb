@@ -953,9 +953,12 @@ export default async function BookingsPage({
   });
 
   /* --- walk-in capacity per visible day --- */
-  const walkInBarberIds = barberOptions
+  const allWalkInBarberIds = barberOptions
     .filter((b) => b.isActive && b.acceptsWalkIns)
     .map((b) => b.id);
+  const walkInBarberIds = selectedBarberId
+    ? allWalkInBarberIds.filter((id) => id === selectedBarberId)
+    : allWalkInBarberIds;
   const visibleDayCount =
     view === "month" ? monthDays.length : view === "week" ? weekDays.length : 1;
   const walkInSlotsByDate = new Map<string, number>();
