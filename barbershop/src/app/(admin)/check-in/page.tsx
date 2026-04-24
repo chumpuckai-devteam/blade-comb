@@ -1,11 +1,15 @@
 import { endOfDay, format, startOfDay } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentAppUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { appointments, barbers, customers, services, shops } from "@/lib/db/schema";
+import {
+  calculateWalkInCapacityPerDay,
+  parseWalkInCapacityConfig,
+} from "@/lib/walk-in-capacity";
 import { updateAppointmentStatusAction } from "../bookings/actions";
 import { NewAppointmentDialog } from "../bookings/new-appointment-dialog";
 
@@ -81,11 +85,12 @@ export default async function CheckInPage() {
   if (!appUser) return null;
 
   const [shop] = await db
-    .select({ timezone: shops.timezone })
+    .select({ timezone: shops.timezone, settings: shops.settings })
     .from(shops)
     .where(eq(shops.id, appUser.shopId))
     .limit(1);
   const timezone = shop?.timezone ?? "America/Chicago";
+  const walkInCapacityConfig = parseWalkInCapacityConfig(shop?.settings);
 
   const zonedNow = toZonedTime(new Date(), timezone);
   const todayStart = fromZonedTime(startOfDay(zonedNow), timezone);
@@ -125,15 +130,57 @@ export default async function CheckInPage() {
         priceCents: services.priceCents,
       })
       .from(services)
-      .where(
-        and(
-          eq(services.shopId, appUser.shopId),
-          eq(services.isActive, true),
-          isNull(services.deletedAt),
-        ),
-      )
+      .where(and(eq(services.shopId, appUser.shopId), isNull(services.deletedAt)))
       .orderBy(asc(services.displayOrder), asc(services.name)),
   ]);
+
+  const walkInBarberRows = await db
+    .select({ id: barbers.id })
+    .from(barbers)
+    .where(
+      and(
+        eq(barbers.shopId, appUser.shopId),
+        eq(barbers.isActive, true),
+        eq(barbers.acceptsWalkIns, true),
+        isNull(barbers.deletedAt),
+      ),
+    );
+  const walkInBarberIds = walkInBarberRows.map((b) => b.id);
+
+  const walkInAppointments =
+    walkInBarberIds.length > 0
+      ? await db
+          .select({
+            barberId: appointments.barberId,
+            scheduledStart: appointments.scheduledStart,
+            scheduledEnd: appointments.scheduledEnd,
+          })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.shopId, appUser.shopId),
+              isNull(appointments.deletedAt),
+              inArray(appointments.barberId, walkInBarberIds),
+              gte(appointments.scheduledStart, todayStart),
+              lte(appointments.scheduledStart, todayEnd),
+              inArray(appointments.status, [
+                "scheduled",
+                "confirmed",
+                "in_progress",
+              ]),
+            ),
+          )
+      : [];
+
+  const [walkInToday] = calculateWalkInCapacityPerDay({
+    timezone,
+    walkInBarberIds,
+    appointmentWindows: walkInAppointments,
+    config: walkInCapacityConfig,
+    startDate: new Date(),
+    lookaheadDays: 1,
+  });
+  const walkInSlotsRemaining = walkInToday?.slots ?? 0;
 
   const rows = await db
     .select({
@@ -188,6 +235,14 @@ export default async function CheckInPage() {
     { label: "No Show / Cancelled", value: statusCounts.no_show + statusCounts.cancelled },
   ];
 
+  const walkInsFull = walkInBarberIds.length === 0 || walkInSlotsRemaining === 0;
+  const walkInHint =
+    walkInBarberIds.length === 0
+      ? "No barbers are currently set to accept walk-ins."
+      : walkInSlotsRemaining === 0
+        ? "No walk-in slots remaining today."
+        : `Based on remaining hours across ${walkInBarberIds.length} walk-in ${walkInBarberIds.length === 1 ? "barber" : "barbers"} and ${walkInCapacityConfig.slotMinutes}-minute slots.`;
+
   return (
     <div className="space-y-6">
       <Card className="rounded-[1.75rem] border-border/70 shadow-sm">
@@ -203,19 +258,32 @@ export default async function CheckInPage() {
               Today&rsquo;s appointments in {timezone}. Tap a status to update it, or add a walk-in to push it onto the calendar.
             </p>
           </div>
-          <NewAppointmentDialog
-            customers={customerOptions}
-            barbers={barberOptions}
-            services={serviceOptions}
-            defaultDate={walkInDefaultDate}
-            defaultTime={walkInDefaultTime}
-            defaultSource="walk_in"
-            defaultStatus="in_progress"
-            triggerLabel="Add walk-in"
-            triggerClassName="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-md transition hover:opacity-95"
-          />
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <NewAppointmentDialog
+              customers={customerOptions}
+              barbers={barberOptions}
+              services={serviceOptions}
+              defaultDate={walkInDefaultDate}
+              defaultTime={walkInDefaultTime}
+              defaultSource="walk_in"
+              defaultStatus="in_progress"
+              triggerLabel="Add walk-in"
+              triggerClassName="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-md transition hover:opacity-95"
+            />
+            <div
+              className={`inline-flex items-center justify-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${
+                walkInsFull
+                  ? "bg-red-100 text-red-700"
+                  : "bg-emerald-100 text-emerald-700"
+              }`}
+            >
+              {walkInsFull
+                ? "Walk-ins full today"
+                : `${walkInSlotsRemaining} walk-in slot${walkInSlotsRemaining === 1 ? "" : "s"} left today`}
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {summaryCards.map((c) => (
               <div
@@ -228,6 +296,28 @@ export default async function CheckInPage() {
                 <p className="mt-1 text-2xl font-semibold tabular-nums">{c.value}</p>
               </div>
             ))}
+          </div>
+          <div
+            className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+              walkInsFull
+                ? "border-red-200 bg-red-50/70"
+                : "border-emerald-200 bg-emerald-50/60"
+            }`}
+          >
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                Walk-in capacity today
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">
+                {walkInSlotsRemaining}{" "}
+                <span className="text-sm font-normal text-muted-foreground">
+                  slot{walkInSlotsRemaining === 1 ? "" : "s"} remaining
+                </span>
+              </p>
+            </div>
+            <p className="max-w-sm text-xs leading-5 text-muted-foreground sm:text-right">
+              {walkInHint}
+            </p>
           </div>
         </CardContent>
       </Card>

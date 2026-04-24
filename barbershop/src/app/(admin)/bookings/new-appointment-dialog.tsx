@@ -184,6 +184,7 @@ export function NewAppointmentDialog({
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [slotMessage, setSlotMessage] = useState("Select a barber and date.");
+  const [mobileStep, setMobileStep] = useState<"customer" | "details">("customer");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -211,6 +212,7 @@ export function NewAppointmentDialog({
     setAvailableTimes([]);
     setIsLoadingSlots(false);
     setSlotMessage("Select a barber and date.");
+    setMobileStep("customer");
   }
 
   function handleAddCustomer(formData: FormData) {
@@ -220,6 +222,7 @@ export function NewAppointmentDialog({
         setLocalCustomers((prev) => [newCustomer, ...prev]);
         setSelectedCustomerId(newCustomer.id);
         setShowNewCustomer(false);
+        setMobileStep("details");
         toast.success(`${newCustomer.firstName} added.`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not add customer.");
@@ -228,6 +231,7 @@ export function NewAppointmentDialog({
   }
 
   function handleOpenChange(next: boolean) {
+    if (next) reset();
     setOpen(next);
     if (!next) reset();
   }
@@ -314,7 +318,7 @@ export function NewAppointmentDialog({
       try {
         await createAppointmentAction(formData);
         toast.success("Appointment created.");
-        setOpen(false);
+        handleOpenChange(false);
         router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not create appointment.");
@@ -355,7 +359,7 @@ export function NewAppointmentDialog({
           </DialogTitle>
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={() => handleOpenChange(false)}
             className="rounded-full p-1 hover:bg-[#f1f3f4]"
           >
             <X className="size-5 text-[#5f6368]" />
@@ -365,7 +369,11 @@ export function NewAppointmentDialog({
         <form action={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4 sm:flex-row">
             {/* Left: customer search or new customer form */}
-            <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className={`flex min-h-0 flex-1 flex-col ${
+                mobileStep === "customer" ? "flex" : "hidden"
+              } sm:flex`}
+            >
               {showNewCustomer ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -473,18 +481,21 @@ export function NewAppointmentDialog({
                             <button
                               key={c.id}
                               type="button"
-                              onClick={() => setSelectedCustomerId(c.id)}
-                              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                              onClick={() => {
+                                setSelectedCustomerId(c.id);
+                                setMobileStep("details");
+                              }}
+                              className={`flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left text-sm transition ${
                                 active
-                                  ? "bg-[#e8f0fe] text-[#1a73e8]"
-                                  : "text-[#3c4043] hover:bg-[#f1f3f4]"
+                                  ? "border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]"
+                                  : "border-transparent text-[#3c4043] hover:bg-[#f1f3f4]"
                               }`}
                             >
-                              <div className={`flex size-8 items-center justify-center rounded-full text-xs font-medium text-white ${active ? "bg-[#1a73e8]" : "bg-[#5f6368]"}`}>
+                              <div className={`flex size-10 items-center justify-center rounded-full text-sm font-medium text-white ${active ? "bg-[#1a73e8]" : "bg-[#5f6368]"}`}>
                                 {c.firstName[0]}{c.lastName?.[0] ?? ""}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className={`truncate font-medium ${active ? "text-[#1a73e8]" : ""}`}>
+                                <p className={`truncate text-[0.95rem] font-medium ${active ? "text-[#1a73e8]" : ""}`}>
                                   {fullName(c)}
                                 </p>
                                 <p className="truncate text-xs text-[#5f6368]">
@@ -513,19 +524,30 @@ export function NewAppointmentDialog({
             </div>
 
             {/* Right: details */}
-            <div className="w-full shrink-0 space-y-4 sm:w-[260px]">
+            <div
+              className={`w-full shrink-0 space-y-4 sm:w-[260px] ${
+                mobileStep === "details" ? "block" : "hidden"
+              } sm:block`}
+            >
               {/* Selected customer */}
               <div className="rounded-lg border p-3" style={{ borderColor: "#dadce0" }}>
                 <div className="flex items-center gap-2.5">
                   <div className={`flex size-8 items-center justify-center rounded-full text-xs font-medium text-white ${selectedCustomer ? "bg-[#1a73e8]" : "bg-[#dadce0]"}`}>
                     {selectedCustomer ? `${selectedCustomer.firstName[0]}${selectedCustomer.lastName?.[0] ?? ""}` : <UserRound className="size-4 text-[#5f6368]" />}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs text-[#5f6368]">Customer</p>
                     <p className="truncate text-sm font-medium">
                       {selectedCustomer ? fullName(selectedCustomer) : "Select a customer"}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileStep("customer")}
+                    className="text-xs font-medium text-[#1a73e8] hover:underline sm:hidden"
+                  >
+                    Change
+                  </button>
                 </div>
               </div>
 
@@ -638,13 +660,25 @@ export function NewAppointmentDialog({
             <div className="flex items-center gap-2 ml-auto">
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => handleOpenChange(false)}
                 className="rounded-md px-4 py-2 text-sm font-medium text-[#1a73e8] hover:bg-[#e8f0fe]"
               >
                 Cancel
               </button>
+              {mobileStep === "customer" ? (
+                <button
+                  type="button"
+                  disabled={!selectedCustomerId}
+                  onClick={() => setMobileStep("details")}
+                  className="inline-flex h-9 items-center rounded-md bg-[#1a73e8] px-5 text-sm font-medium text-white hover:bg-[#1765cc] disabled:opacity-40 sm:hidden"
+                >
+                  Next
+                </button>
+              ) : null}
               <Button
-                className="h-9 rounded-md bg-[#1a73e8] px-5 text-sm font-medium text-white hover:bg-[#1765cc] disabled:opacity-40"
+                className={`h-9 rounded-md bg-[#1a73e8] px-5 text-sm font-medium text-white hover:bg-[#1765cc] disabled:opacity-40 ${
+                  mobileStep === "customer" ? "hidden sm:inline-flex" : ""
+                }`}
                 disabled={isPending || !canSubmit}
                 type="submit"
               >

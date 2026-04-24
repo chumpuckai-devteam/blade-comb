@@ -290,6 +290,64 @@ function EventChip({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Overlap layout (Google-calendar-style lane packing)                */
+/* ------------------------------------------------------------------ */
+
+type LaidOutEvent = {
+  event: CalendarEvent;
+  lane: number;
+  laneCount: number;
+};
+
+function layoutDayEvents(events: CalendarEvent[]): LaidOutEvent[] {
+  const sorted = [...events].sort(
+    (a, b) =>
+      a.start.getTime() - b.start.getTime() ||
+      b.end.getTime() - a.end.getTime(),
+  );
+
+  const results: LaidOutEvent[] = [];
+  let cluster: { event: CalendarEvent; lane: number }[] = [];
+  let clusterEnd = 0;
+  let laneEnds: number[] = [];
+
+  const flush = () => {
+    const laneCount = laneEnds.length;
+    for (const item of cluster) {
+      results.push({ event: item.event, lane: item.lane, laneCount });
+    }
+    cluster = [];
+    laneEnds = [];
+    clusterEnd = 0;
+  };
+
+  for (const ev of sorted) {
+    const start = ev.start.getTime();
+    const end = ev.end.getTime();
+    if (start >= clusterEnd) flush();
+
+    let assigned = -1;
+    for (let i = 0; i < laneEnds.length; i += 1) {
+      if (laneEnds[i] <= start) {
+        assigned = i;
+        laneEnds[i] = end;
+        break;
+      }
+    }
+    if (assigned === -1) {
+      assigned = laneEnds.length;
+      laneEnds.push(end);
+    }
+
+    cluster.push({ event: ev, lane: assigned });
+    clusterEnd = Math.max(clusterEnd, end);
+  }
+  flush();
+
+  return results;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Week / Day time grid                                               */
 /* ------------------------------------------------------------------ */
 
@@ -406,17 +464,24 @@ function TimeGrid({
                 ))}
 
                 {/* Events */}
-                {dayEvents.map((ev) => {
+                {layoutDayEvents(dayEvents).map(({ event: ev, lane, laneCount }) => {
                   const startMin = (ev.start.getHours() - CALENDAR_START_HOUR) * 60 + ev.start.getMinutes();
                   const durMin = Math.max(30, Math.round((ev.end.getTime() - ev.start.getTime()) / 60000));
                   const top = (startMin / 60) * HOUR_HEIGHT;
                   const height = Math.max((durMin / 60) * HOUR_HEIGHT, 28);
+                  const widthPct = 100 / laneCount;
+                  const leftPct = widthPct * lane;
                   return (
                     <Link
                       key={ev.id}
                       href={hrefForEvent(ev.id)}
-                      className="absolute left-0.5 right-0.5 z-10"
-                      style={{ top, height }}
+                      className="absolute z-10"
+                      style={{
+                        top,
+                        height,
+                        left: `calc(${leftPct}% + 2px)`,
+                        width: `calc(${widthPct}% - 4px)`,
+                      }}
                     >
                       <EventChip event={ev} />
                     </Link>
