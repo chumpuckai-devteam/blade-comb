@@ -551,7 +551,6 @@ function SidebarFilters({
   statusCounts,
   view,
   date,
-  ownerView,
   lockedBarber,
 }: {
   barbers: (BarberOption & { color: string })[];
@@ -564,7 +563,6 @@ function SidebarFilters({
   statusCounts: Map<string, number>;
   view: CalendarView;
   date: string;
-  ownerView: boolean;
   lockedBarber: boolean;
 }) {
   const base = { view, date };
@@ -795,7 +793,6 @@ export default async function BookingsPage({
     appUser.role === "barber"
       ? barberOptions.find((b) => b.userId === appUser.id)?.id
       : undefined;
-  const ownerView = appUser.role === "owner";
   const selectedBarberId = params.barberId ?? assignedBarberId ?? "";
 
   const calendarStart = startOfViewRange(view, anchorDate);
@@ -977,7 +974,6 @@ export default async function BookingsPage({
             statusCounts={statusCounts}
             view={view}
             date={dateStr}
-            ownerView={ownerView}
             lockedBarber={Boolean(assignedBarberId)}
           />
         </aside>
