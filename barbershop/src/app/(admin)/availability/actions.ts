@@ -1,11 +1,11 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentAppUser } from "@/lib/auth";
 import { normalizeTimeRange } from "@/lib/booking-availability";
 import { db } from "@/lib/db/client";
-import { shops } from "@/lib/db/schema";
+import { barbers, shops } from "@/lib/db/schema";
 import {
   DEFAULT_SHOP_CLOSE_TIME,
   DEFAULT_SHOP_OPEN_TIME,
@@ -151,6 +151,46 @@ export async function updateBarberUnavailableDatesAction(formData: FormData) {
     .where(eq(shops.id, appUser.shopId));
 
   revalidatePath("/availability");
+  revalidatePath("/dashboard");
+
+  return { success: true };
+}
+
+export async function createBarberAction(formData: FormData) {
+  const { authUser, appUser } = await getCurrentAppUser();
+
+  if (!authUser || !appUser) {
+    throw new Error("You must be signed in.");
+  }
+
+  if (appUser.role !== "owner") {
+    throw new Error("Only shop owners can add barbers.");
+  }
+
+  const displayName = formData.get("displayName")?.toString().trim();
+  const acceptsWalkIns = formData.get("acceptsWalkIns") === "on";
+
+  if (!displayName) {
+    throw new Error("Barber name is required.");
+  }
+
+  const [maxOrder] = await db
+    .select({ displayOrder: barbers.displayOrder })
+    .from(barbers)
+    .where(and(eq(barbers.shopId, appUser.shopId), isNull(barbers.deletedAt)))
+    .orderBy(desc(barbers.displayOrder))
+    .limit(1);
+
+  await db.insert(barbers).values({
+    shopId: appUser.shopId,
+    displayName,
+    acceptsWalkIns,
+    isActive: true,
+    displayOrder: (maxOrder?.displayOrder ?? 0) + 1,
+  });
+
+  revalidatePath("/availability");
+  revalidatePath("/bookings");
   revalidatePath("/dashboard");
 
   return { success: true };

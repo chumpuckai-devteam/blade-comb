@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  createBarberAction,
   updateBarberAvailabilityAction,
   updateBarberUnavailableDatesAction,
   updateShopClosedDatesAction,
@@ -315,6 +316,80 @@ function ShopClosedDatesCard({ closedDates: initial }: { closedDates: string[] }
 }
 
 /* ------------------------------------------------------------------ */
+/*  Add barber                                                         */
+/* ------------------------------------------------------------------ */
+
+function AddBarberCard() {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [displayName, setDisplayName] = useState("");
+  const [acceptsWalkIns, setAcceptsWalkIns] = useState(true);
+
+  function addBarber() {
+    const trimmed = displayName.trim();
+    if (!trimmed) {
+      toast.error("Enter a name for the barber.");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("displayName", trimmed);
+        if (acceptsWalkIns) fd.set("acceptsWalkIns", "on");
+        await createBarberAction(fd);
+        toast.success(`${trimmed} added.`);
+        setDisplayName("");
+        setAcceptsWalkIns(true);
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to add barber.");
+      }
+    });
+  }
+
+  return (
+    <Card className="rounded-2xl border-border/70 shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">Add barber</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-3 text-sm text-muted-foreground">
+          New barbers get default weekly hours of 10:00–19:00 and can be customized below.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex-1 min-w-[200px] space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Display name</span>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Marcus"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addBarber();
+                }
+              }}
+            />
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <input
+              type="checkbox"
+              checked={acceptsWalkIns}
+              onChange={(e) => setAcceptsWalkIns(e.target.checked)}
+              className="size-4 rounded border-border"
+            />
+            Accepts walk-ins
+          </label>
+          <Button onClick={addBarber} disabled={isPending} size="sm">
+            {isPending ? "Adding..." : "Add barber"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main editor                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -333,6 +408,8 @@ export function AvailabilityEditor({ barbers, closedDates }: AvailabilityEditorP
           dates as unavailable. This data drives the walk-in capacity card on the dashboard.
         </p>
       </div>
+
+      <AddBarberCard />
 
       <ShopClosedDatesCard closedDates={closedDates} />
 
